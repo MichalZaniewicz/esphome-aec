@@ -41,14 +41,24 @@ void speexdsp_mem_note_free(void *ptr);
 size_t speexdsp_mem_internal_bytes(void);
 size_t speexdsp_mem_psram_bytes(void);
 
+/* 16-byte alignment for every SpeexDSP buffer. The ESP-DSP FFT kernels on the
+ * ESP32-S3 (AES3) use 128-bit loads and stores that ignore the low address
+ * bits, so a buffer that heap_caps_malloc() returns 4- or 8-byte aligned gets
+ * its first bytes written over the heap block header in front of it. That
+ * corrupts the heap: heap_caps_get_largest_free_block() and friends then fault
+ * (LoadProhibited in tlsf_walk_pool), and the network stack misbehaves long
+ * before anything crashes. Memory from heap_caps_aligned_alloc() is released
+ * with heap_caps_free() as before. */
+#define SPEEX_ALLOC_ALIGN 16
+
 // Core memory allocation functions
 #define OVERRIDE_SPEEX_ALLOC
 static inline void *speex_alloc(int size) {
    if (size <= 0)
       return NULL;
-   void *ptr = heap_caps_malloc(size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+   void *ptr = heap_caps_aligned_alloc(SPEEX_ALLOC_ALIGN, size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
    if (ptr == NULL)
-      ptr = heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+      ptr = heap_caps_aligned_alloc(SPEEX_ALLOC_ALIGN, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
    if (ptr) {
       memset(ptr, 0, size);
       speexdsp_mem_note_alloc(ptr, (size_t) size);
@@ -60,9 +70,9 @@ static inline void *speex_alloc(int size) {
 static inline void *speex_alloc_scratch(int size) {
    if (size <= 0)
       return NULL;
-   void *ptr = heap_caps_malloc(size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+   void *ptr = heap_caps_aligned_alloc(SPEEX_ALLOC_ALIGN, size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
    if (ptr == NULL)
-      ptr = heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+      ptr = heap_caps_aligned_alloc(SPEEX_ALLOC_ALIGN, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
    if (ptr)
       speexdsp_mem_note_alloc(ptr, (size_t) size);
    return ptr;
