@@ -208,6 +208,11 @@ class AECSpeexDspComponent : public Component {
   // Digital attenuation applied to media playback before the I2S TX and the
   // reference tap, keeping the analog chain (amp, loopback) out of clipping.
   void set_playback_gain_db(float db) { this->playback_gain_db_ = db; }
+  // Playback ring size and post-underrun prebuffer, in ms of 16 kHz mono PCM.
+  void set_playback_buffer_ms(uint32_t buffer_ms, uint32_t rebuffer_ms) {
+    this->playback_buffer_bytes_ = SAMPLE_RATE * sizeof(int16_t) * buffer_ms / 1000;
+    this->playback_rebuffer_bytes_ = SAMPLE_RATE * sizeof(int16_t) * rebuffer_ms / 1000;
+  }
   void configure_beamforming(bool enabled, uint8_t max_lag, uint8_t update_frames, uint16_t min_rms,
                              uint8_t min_correlation_percent, uint8_t min_peak_dominance_percent) {
     this->beamforming_enabled_ = enabled;
@@ -389,6 +394,9 @@ class AECSpeexDspComponent : public Component {
   uint16_t reference_delay_samples_{0};
   float playback_gain_db_{0.0f};
   float playback_gain_{1.0f};
+  // Defaults match the original fixed sizes (2 s stereo ring, 96 KB prebuffer).
+  size_t playback_buffer_bytes_{128000};
+  size_t playback_rebuffer_bytes_{96 * 1024};
   WakeBeep wake_beep_;
   bool beamforming_enabled_{false};
   AdaptiveDelayAndSumBeamformer beamformer_;

@@ -28,6 +28,8 @@ CONF_NOISE_SUPPRESSION = "noise_suppression"
 CONF_NOISE_SUPPRESSION_LEVEL_DB = "noise_suppression_level_db"
 CONF_OUTPUT_CHANNEL = "output_channel"
 CONF_PLAYBACK_GAIN_DB = "playback_gain_db"
+CONF_PLAYBACK_BUFFER = "playback_buffer"
+CONF_PLAYBACK_REBUFFER = "playback_rebuffer"
 CONF_PROFILING = "profiling"
 CONF_REFERENCE_SLOT = "reference_slot"
 CONF_REFERENCE_SOURCE = "reference_source"
@@ -104,6 +106,8 @@ def _validate(config):
         )
     if config[CONF_FILTER_LENGTH] < config[CONF_FRAME_SIZE]:
         raise cv.Invalid("filter_length must be at least frame_size")
+    if config[CONF_PLAYBACK_REBUFFER] >= config[CONF_PLAYBACK_BUFFER]:
+        raise cv.Invalid("playback_rebuffer must be shorter than playback_buffer")
     if config[CONF_OUTPUT_CHANNEL] != "first" and len(selected) < 2:
         raise cv.Invalid(
             "output_channel 'second' and 'mixed' require two microphone_slots"
@@ -227,6 +231,20 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_ECHO_SUPPRESS_DB, default=40): cv.int_range(min=5, max=60),
             cv.Optional(CONF_ECHO_SUPPRESS_ACTIVE_DB, default=15): cv.int_range(min=5, max=60),
             cv.Optional(CONF_PLAYBACK_GAIN_DB, default=0.0): cv.float_range(min=-60.0, max=0.0),
+            # Playback ring size and the fill level awaited after an underrun,
+            # as time of 16 kHz mono PCM. Large values ride through bursty
+            # streaming TTS fed straight to this speaker; small values keep
+            # latency low (ducking, stop and barge-in act on what is heard)
+            # when a mixer or media player already buffers upstream.
+            cv.Optional(
+                CONF_PLAYBACK_BUFFER, default="4000ms"
+            ): cv.All(
+                cv.positive_time_period_milliseconds,
+                cv.Range(min=cv.TimePeriod(milliseconds=100), max=cv.TimePeriod(milliseconds=16000)),
+            ),
+            cv.Optional(
+                CONF_PLAYBACK_REBUFFER, default="3072ms"
+            ): cv.positive_time_period_milliseconds,
             cv.Optional(CONF_REFERENCE_DELAY_SAMPLES): cv.int_range(min=0, max=4000),
             cv.Optional(CONF_RESAMPLER, default=False): cv.boolean,
             cv.Optional(CONF_METERS): cv.Schema(
@@ -333,6 +351,12 @@ async def to_code(config):
     cg.add(var.set_echo_suppress_db(config[CONF_ECHO_SUPPRESS_DB]))
     cg.add(var.set_echo_suppress_active_db(config[CONF_ECHO_SUPPRESS_ACTIVE_DB]))
     cg.add(var.set_playback_gain_db(config[CONF_PLAYBACK_GAIN_DB]))
+    cg.add(
+        var.set_playback_buffer_ms(
+            config[CONF_PLAYBACK_BUFFER].total_milliseconds,
+            config[CONF_PLAYBACK_REBUFFER].total_milliseconds,
+        )
+    )
     if config[CONF_RESAMPLER]:
         cg.add_define("USE_AEC_SPEEXDSP_PLAYBACK_RESAMPLER")
     if config[CONF_REFERENCE_SOURCE] == "playback":

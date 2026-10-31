@@ -40,17 +40,17 @@ extern "C" void speex_preprocess_profile_get(unsigned long long cycles[6], unsig
 
 static const char *const TAG = "aec_speexdsp";
 static constexpr uint32_t AUDIO_TASK_STACK_BYTES = 8192;
-// Sized for two seconds of stereo PCM (four seconds for the mono Assist
-// stream). Long live-model replies can arrive with multi-second gaps followed
-// by large bursts, so the previous one-second stereo reserve was too small.
-static const uint32_t PLAYBACK_BUFFER_MS = 2000;
+// Playback ring size and post-underrun prebuffer are configurable
+// (playback_buffer / playback_rebuffer). The defaults keep the original
+// sizes: two seconds of stereo PCM (four seconds for the mono Assist stream),
+// because long live-model replies can arrive with multi-second gaps followed
+// by large bursts.
 // Home Assistant's streaming TTS (e.g. gemini live) arrives in 3-4 s bursts
 // separated by 2-3.5 s gaps. After an underrun, wait for roughly three seconds
 // of PCM before resuming so a resumed stream rides through the following gap
 // instead of cutting out again within ~0.3 s. The timeout ensures a short
 // final tail is still played without waiting for a full threshold (and bounds
 // the extra start-of-response latency at ~0.5 s).
-static const size_t PLAYBACK_REBUFFER_BYTES = 96 * 1024;
 static const uint32_t PLAYBACK_REBUFFER_MAX_MS = 500;
 static const uint32_t REFERENCE_BUFFER_MS = 250;
 static const size_t TRANSPORT_FRAME_SAMPLES = 512;
@@ -89,7 +89,7 @@ void AECSpeexDspComponent::setup() {
 #endif
 
   std::unique_ptr<ring_buffer::RingBuffer> buffer =
-      ring_buffer::RingBuffer::create(SAMPLE_RATE * 2 * 2 * PLAYBACK_BUFFER_MS / 1000);
+      ring_buffer::RingBuffer::create(this->playback_buffer_bytes_);
   if (buffer == nullptr) {
     ESP_LOGE(TAG, "Could not allocate playback ring buffer");
     this->mark_failed();
@@ -1259,7 +1259,7 @@ void AECSpeexDspComponent::run_playback_task_() {
       if (buffering && this->buffering_since_ms_.load() == 0)
         this->buffering_since_ms_.store(now);
 
-      const bool rebuffer_ready = available >= PLAYBACK_REBUFFER_BYTES ||
+      const bool rebuffer_ready = available >= this->playback_rebuffer_bytes_ ||
                                   (this->buffering_since_ms_.load() != 0 &&
                                    now - this->buffering_since_ms_.load() >= PLAYBACK_REBUFFER_MAX_MS);
       if (available > 0 && (!buffering || rebuffer_ready)) {
@@ -1275,7 +1275,7 @@ void AECSpeexDspComponent::run_playback_task_() {
         this->buffering_since_ms_.store(now);
         this->playback_underruns_++;
         ESP_LOGW(TAG, "Playback underrun #%" PRIu32 ": ring empty, prebuffering %u KB before resuming",
-                 this->playback_underruns_.load(), static_cast<unsigned>(PLAYBACK_REBUFFER_BYTES / 1024));
+                 this->playback_underruns_.load(), static_cast<unsigned>(this->playback_rebuffer_bytes_ / 1024));
 #ifdef USE_AEC_SPEEXDSP_PLAYBACK_RESAMPLER
         initialise_resampler();
 #endif
